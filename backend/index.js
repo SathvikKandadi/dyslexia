@@ -31,6 +31,27 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema);
 
+// Progress Schema
+const progressSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  exercisesCompleted: { type: Number, default: 0 },
+  correctAnswers: { type: Number, default: 0 },
+  totalQuestions: { type: Number, default: 0 },
+  levelsCompleted: { type: Number, default: 0 },
+  testHistory: [{
+    date: { type: Date, default: Date.now },
+    type: { type: String, enum: ['Reading', 'Spelling', 'Math', 'Level Test'] },
+    level: { type: Number, default: 0 },
+    score: { type: Number, default: 0 },
+    accuracy: { type: Number, default: 0 },
+    totalQuestions: { type: Number, default: 0 },
+    correctAnswers: { type: Number, default: 0 },
+    skillName: { type: String, default: '' }
+  }]
+});
+
+const Progress = mongoose.model('Progress', progressSchema);
+
 // Initialize OpenAI
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -456,6 +477,109 @@ app.post('/math-quiz', authenticateToken, (req, res) => {
     return res.status(500).json({ 
       message: 'Error generating math questions', 
       error: error.message 
+    });
+  }
+});
+
+// Dashboard Routes
+app.get('/dashboard', authenticateToken, async (req, res) => {
+  try {
+    console.log('Fetching dashboard data for user:', req.user.userId);
+    const progress = await Progress.findOne({ userId: req.user.userId });
+    
+    if (!progress) {
+      console.log('No progress found, creating new record');
+      // Create new progress record if none exists
+      const newProgress = new Progress({ 
+        userId: req.user.userId,
+        exercisesCompleted: 0,
+        correctAnswers: 0,
+        totalQuestions: 0,
+        levelsCompleted: 0,
+        testHistory: []
+      });
+      await newProgress.save();
+      return res.json(newProgress);
+    }
+    
+    console.log('Found existing progress:', progress);
+    res.json(progress);
+  } catch (error) {
+    console.error('Error fetching dashboard data:', error);
+    res.status(500).json({ 
+      message: 'Failed to fetch dashboard data',
+      error: error.message 
+    });
+  }
+});
+
+app.post('/dashboard/update', authenticateToken, async (req, res) => {
+  try {
+    const { exerciseType, score, skillName, correct, total, level, isLevelComplete, isExerciseComplete = false } = req.body;
+    
+    console.log('Updating dashboard for user:', req.user.userId);
+    console.log('Update data:', { exerciseType, score, skillName, correct, total, level });
+    
+    // Get the user's progress document
+    let progress = await Progress.findOne({ userId: req.user.userId });
+    
+    if (!progress) {
+      console.log('No existing progress found, creating new record');
+      progress = new Progress({
+        userId: req.user.userId,
+        exercisesCompleted: 0,
+        correctAnswers: 0,
+        totalQuestions: 0,
+        levelsCompleted: 0,
+        testHistory: []
+      });
+    } else {
+      console.log('Found existing progress:', {
+        userId: progress.userId,
+        correctAnswers: progress.correctAnswers,
+        totalQuestions: progress.totalQuestions
+      });
+    }
+
+    // Only update overall stats if this is not a duplicate update
+    if (!isExerciseComplete) {
+      progress.correctAnswers += correct;
+      progress.totalQuestions += total;
+      console.log('Updated stats:', {
+        newCorrectAnswers: progress.correctAnswers,
+        newTotalQuestions: progress.totalQuestions
+      });
+    }
+
+    // Add to test history
+    const historyEntry = {
+      date: new Date(),
+      type: exerciseType,
+      score: score,
+      skillName: skillName,
+      accuracy: (correct / total) * 100,
+      level: level,
+      totalQuestions: total,
+      correctAnswers: correct
+    };
+    progress.testHistory.push(historyEntry);
+    console.log('Added history entry:', historyEntry);
+
+    // Update levels completed if this is a level completion
+    if (isLevelComplete && level > progress.levelsCompleted) {
+      progress.levelsCompleted = level;
+      console.log('Updated levels completed to:', level);
+    }
+
+    await progress.save();
+    console.log('Progress saved successfully');
+    res.json({ message: 'Progress updated successfully' });
+  } catch (err) {
+    console.error('Error updating progress:', err);
+    res.status(500).json({ 
+      message: 'Failed to update progress',
+      error: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
     });
   }
 });

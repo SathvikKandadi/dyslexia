@@ -511,6 +511,9 @@ const LevelTest = () => {
   const [token, setToken] = useState(localStorage.getItem("token"));
   const [showImage, setShowImage] = useState(false);
   const [isCorrect, setIsCorrect] = useState(false);
+  const [selectedOption, setSelectedOption] = useState("");
+  const [totalAttempts, setTotalAttempts] = useState(0);
+  const [levelScores, setLevelScores] = useState({});
 
   const [playSuccess] = useSound("/assets/success.mp3");
   const [playError] = useSound("/assets/error.mp3");
@@ -745,7 +748,7 @@ const LevelTest = () => {
   };
 
   const handleOptionSelect = (option) => {
-    setUserAnswer(option);
+    setSelectedOption(option);
   };
 
   const playCorrectSound = () => {
@@ -765,79 +768,145 @@ const LevelTest = () => {
   };
 
   const checkAnswer = () => {
-    if (!userAnswer) {
-      setResult("Please provide an answer first.");
-      return;
-    }
-
     const currentQuestion = questions[currentQuestionIndex];
-    if (!currentQuestion) {
-      setError("Question not found. Please try again.");
+    
+    if (currentQuestion.type === "math_problem") {
+      if (!userAnswer.trim()) {
+        setResult("Please enter your answer.");
+        return;
+      }
+    } else if (!selectedOption) {
+      setResult("Please select an option first.");
       return;
     }
 
-    let isCorrect = false;
-    
-    if (currentQuestion.type === "identification" || currentQuestion.type === "reading_spelling") {
-      isCorrect = userAnswer === currentQuestion.answer;
-    } else if (currentQuestion.type === "math_problem") {
-      const userAnswerNum = parseFloat(userAnswer);
-      const correctAnswerNum = parseFloat(currentQuestion.answer);
-      isCorrect = !isNaN(userAnswerNum) && !isNaN(correctAnswerNum) && userAnswerNum === correctAnswerNum;
+    if (!currentQuestion) {
+      setError("Question data is missing. Please try again.");
+      return;
     }
-    
-    // Set the image and play sound based on correctness
-    setIsCorrect(isCorrect);
+
+    let isAnswerCorrect = false;
+
+    if (currentQuestion.type === "math_problem") {
+      isAnswerCorrect = userAnswer.trim() === currentQuestion.answer;
+    } else {
+      isAnswerCorrect = selectedOption === currentQuestion.answer;
+    }
+
+    // Update score first
+    const newScore = isAnswerCorrect ? score + 1 : score;
+    setScore(newScore);
+    setIsCorrect(isAnswerCorrect);
     setShowImage(true);
-    
-    if (isCorrect) {
-      setScore(score + 1);
+
+    if (isAnswerCorrect) {
       setResult("✅ Correct! Well done!");
       playCorrectSound();
     } else {
-      setResult(`❌ Incorrect. The correct answer is: ${currentQuestion.answer}`);
+      setResult(`❌ Incorrect. The correct answer is "${currentQuestion.answer}"`);
       playWrongSound();
     }
-    
-    // Hide the image after 2 seconds
+
+    // Increment total attempts
+    setTotalAttempts(prev => prev + 1);
+
+    // Check if this is the last question
+    const isLastQuestion = currentQuestionIndex === questions.length - 1;
+
+    // Show result briefly before moving to next question or completing level
     setTimeout(() => {
       setShowImage(false);
-    }, 2000);
-    
-    // Move to next question or complete level
-    if (currentQuestionIndex + 1 < questions.length) {
-      setTimeout(() => {
-        setCurrentQuestionIndex(currentQuestionIndex + 1);
-        setUserAnswer("");
+      if (isLastQuestion) {
+        // If it's the last question, update progress with the final score
+        updateProgress(newScore);
+      } else {
+        // If it's not the last question, move to the next one
         setResult("");
-      }, 1500);
-    } else {
-      setTimeout(() => {
-        setShowLevelComplete(true);
-        updateProgress();
-      }, 1500);
+        setSelectedOption("");
+        setUserAnswer("");
+        setCurrentQuestionIndex(prev => prev + 1);
+      }
+    }, 1500);
+  };
+
+  const updateProgress = (finalScore) => {
+    const finalAccuracy = (finalScore / questions.length) * 100;
+
+    // Update level scores state
+    setLevelScores(prev => ({
+      ...prev,
+      [currentLevel]: {
+        score: finalScore,
+        accuracy: finalAccuracy,
+        totalCorrect: finalScore,
+        totalQuestions: questions.length
+      }
+    }));
+
+    // Update dashboard with level completion
+    const token = localStorage.getItem("token");
+    if (token) {
+      axios.post("http://localhost:3000/dashboard/update", {
+        exerciseType: "Level Test",
+        score: finalScore,
+        skillName: `Level ${currentLevel} Complete`,
+        correct: finalScore,
+        total: questions.length,
+        level: currentLevel,
+        isLevelComplete: true,
+        accuracy: finalAccuracy
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      }).catch(err => {
+        console.error("Failed to update level progress:", err);
+      });
+    }
+
+    // Show level complete screen
+    setShowLevelComplete(true);
+
+    // Reset states for next level after a longer delay
+    setTimeout(() => {
+      setScore(0);
+      setTotalAttempts(0);
+      setCurrentQuestionIndex(0);
+      setSelectedOption("");
+      setUserAnswer("");
+      setResult("");
+    }, 3000);  // Increased delay to ensure score is visible
+  };
+
+  // Add function to update final test score
+  const handleTestComplete = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    const totalScore = Object.values(levelScores).reduce((sum, level) => sum + level.score, 0);
+    const totalQuestions = Object.values(levelScores).reduce((sum, level) => sum + level.totalQuestions, 0);
+    const averageAccuracy = Object.values(levelScores).reduce((sum, level) => sum + level.accuracy, 0) / Object.keys(levelScores).length;
+
+    try {
+      await axios.post("http://localhost:3000/dashboard/update", {
+        exerciseType: "Level Test",
+        score: Math.round(totalScore),
+        skillName: "Overall Assessment",
+        levelsCompleted: currentLevel,
+        isTestComplete: true,
+        totalAccuracy: averageAccuracy.toFixed(1)
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+    } catch (err) {
+      console.error("Failed to update final test score:", err);
     }
   };
 
-  const updateProgress = () => {
-    let progress = JSON.parse(localStorage.getItem("studentProgress")) || {
-      exercisesCompleted: 0,
-      correctAnswers: 0,
-      totalQuestions: 0,
-      levelsCompleted: 0,
-    };
-    
-    progress.exercisesCompleted += 1;
-    progress.totalQuestions += questions.length;
-    progress.correctAnswers += score;
-    
-    // Only increment levelsCompleted if all questions were answered correctly
-    if (score === questions.length) {
-      progress.levelsCompleted += 1;
+  // Call handleTestComplete when all levels are completed
+  useEffect(() => {
+    if (currentLevel > 3 && Object.keys(levelScores).length === 3) {
+      handleTestComplete();
     }
-    
-    localStorage.setItem("studentProgress", JSON.stringify(progress));
-  };
+  }, [currentLevel, levelScores]);
 
   const nextLevel = () => {
     if (currentLevel < levelStructure.length) {
@@ -875,18 +944,27 @@ const LevelTest = () => {
   }
 
   if (showFinalResults) {
+    const totalScore = Object.values(levelScores).reduce((sum, level) => sum + level.score, 0);
+    const totalQuestions = Object.values(levelScores).reduce((sum, level) => sum + level.totalQuestions, 0);
+    const averageAccuracy = Object.values(levelScores).reduce((sum, level) => sum + level.accuracy, 0) / Object.keys(levelScores).length;
+
     return (
       <div className="container">
         <h1>Test Completed!</h1>
         <div className="card">
           <h2>Final Results</h2>
           <p>You've completed all {levelStructure.length} levels!</p>
-          <p>Total Score: {score} out of {questions.length}</p>
-          <div className="progress-bar">
-            <div 
-              className="progress-bar-fill" 
-              style={{ width: `${(score / questions.length) * 100}%` }}
-            ></div>
+          <div className="final-stats">
+            <p>Total Score: {totalScore} out of {totalQuestions}</p>
+            <p>Average Accuracy: {averageAccuracy.toFixed(1)}%</p>
+            <h3>Level Breakdown:</h3>
+            {Object.entries(levelScores).map(([level, stats]) => (
+              <div key={level} className="level-breakdown">
+                <h4>Level {level}</h4>
+                <p>Score: {stats.score}/{stats.totalQuestions}</p>
+                <p>Accuracy: {stats.accuracy.toFixed(1)}%</p>
+              </div>
+            ))}
           </div>
           <button onClick={restartTest}>Restart Test</button>
         </div>
@@ -895,16 +973,26 @@ const LevelTest = () => {
   }
 
   if (showLevelComplete) {
+    // Get the current level's score from levelScores, or use the current score if not yet saved
+    const currentLevelScore = levelScores[currentLevel] || { 
+      score: score,
+      accuracy: (score / questions.length) * 100,
+      totalQuestions: questions.length
+    };
+    
     return (
       <div className="container">
         <h1>Level {currentLevel} Complete!</h1>
         <div className="card">
           <h2>{levelStructure[currentLevel - 1].name}</h2>
-          <p>You scored {score} out of {questions.length}!</p>
+          <div className="level-stats">
+            <p>Score: {currentLevelScore.score} out of {currentLevelScore.totalQuestions}</p>
+            <p>Accuracy: {currentLevelScore.accuracy.toFixed(1)}%</p>
+          </div>
           <div className="progress-bar">
             <div 
               className="progress-bar-fill" 
-              style={{ width: `${(score / questions.length) * 100}%` }}
+              style={{ width: `${(currentLevelScore.score / currentLevelScore.totalQuestions) * 100}%` }}
             ></div>
           </div>
           <button onClick={nextLevel}>
@@ -948,7 +1036,7 @@ const LevelTest = () => {
               {currentQuestion.options.map((option, index) => (
                 <div 
                   key={index} 
-                  className={`option ${userAnswer === option ? 'selected' : ''}`}
+                  className={`option ${selectedOption === option ? 'selected' : ''}`}
                   onClick={() => handleOptionSelect(option)}
                 >
                   {option}
@@ -963,7 +1051,7 @@ const LevelTest = () => {
             {currentQuestion.options.map((option, index) => (
               <div 
                 key={index} 
-                className={`option ${userAnswer === option ? 'selected' : ''}`}
+                className={`option ${selectedOption === option ? 'selected' : ''}`}
                 onClick={() => handleOptionSelect(option)}
               >
                 {option}
@@ -983,7 +1071,10 @@ const LevelTest = () => {
           </div>
         )}
         
-        <button onClick={checkAnswer} disabled={!userAnswer}>
+        <button 
+          onClick={checkAnswer} 
+          disabled={currentQuestion.type === "math_problem" ? !userAnswer : !selectedOption}
+        >
           Check Answer
         </button>
         

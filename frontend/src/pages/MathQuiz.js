@@ -98,10 +98,28 @@ const MathQuiz = () => {
     const userAnswerNum = parseFloat(userAnswer);
     const correctAnswerNum = parseFloat(currentQuestion.answer);
     
-    if (!isNaN(userAnswerNum) && !isNaN(correctAnswerNum) && userAnswerNum === correctAnswerNum) {
+    const isCorrect = !isNaN(userAnswerNum) && !isNaN(correctAnswerNum) && userAnswerNum === correctAnswerNum;
+    
+    if (isCorrect) {
       setScore(score + 1);
       setResult("✅ Correct! Well done!");
-      updateProgress(true);
+      
+      // Update dashboard directly instead of using local storage
+      const token = localStorage.getItem("token");
+      if (token) {
+        axios.post("http://localhost:3000/dashboard/update", {
+          exerciseType: "Math",
+          score: 100,
+          skillName: `Math - ${currentQuestion.difficulty}`,
+          correct: 1,
+          total: 1,
+          isExerciseComplete: false
+        }, {
+          headers: { Authorization: `Bearer ${token}` }
+        }).catch(err => {
+          console.error("Failed to update dashboard:", err);
+        });
+      }
       
       // Move to next question after a delay
       setTimeout(() => {
@@ -109,7 +127,23 @@ const MathQuiz = () => {
       }, 1500);
     } else {
       setResult(`❌ Incorrect. The correct answer is: ${currentQuestion.answer}`);
-      updateProgress(false);
+      
+      // Update dashboard for incorrect answer
+      const token = localStorage.getItem("token");
+      if (token) {
+        axios.post("http://localhost:3000/dashboard/update", {
+          exerciseType: "Math",
+          score: 0,
+          skillName: `Math - ${currentQuestion.difficulty}`,
+          correct: 0,
+          total: 1,
+          isExerciseComplete: false
+        }, {
+          headers: { Authorization: `Bearer ${token}` }
+        }).catch(err => {
+          console.error("Failed to update dashboard:", err);
+        });
+      }
     }
   };
 
@@ -128,21 +162,6 @@ const MathQuiz = () => {
       }
       return nextIndex;
     });
-  };
-
-  const updateProgress = (correct) => {
-    let progress = JSON.parse(localStorage.getItem("studentProgress")) || {
-      exercisesCompleted: 0,
-      correctAnswers: 0,
-      totalQuestions: 0,
-      levelsCompleted: 0,
-    };
-    
-    progress.exercisesCompleted += 1;
-    progress.totalQuestions += 1;
-    if (correct) progress.correctAnswers += 1;
-    
-    localStorage.setItem("studentProgress", JSON.stringify(progress));
   };
 
   const handleKeyPress = (e) => {

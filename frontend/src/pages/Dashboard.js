@@ -1,13 +1,34 @@
 import React, { useState, useEffect } from "react";
 import { Bar, Pie, Line } from "react-chartjs-2";
-import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, PointElement, LineElement } from "chart.js";
+import {
+  Chart as ChartJS,
+  ArcElement,
+  Tooltip,
+  Legend,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  PointElement,
+  LineElement,
+  Title
+} from "chart.js";
+import axios from "axios";
 
 // Register Chart.js Components
-ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, PointElement, LineElement);
+ChartJS.register(
+  ArcElement,
+  Tooltip,
+  Legend,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  PointElement,
+  LineElement,
+  Title
+);
 
 const Dashboard = () => {
   const [progress, setProgress] = useState({
-    exercisesCompleted: 0,
     correctAnswers: 0,
     totalQuestions: 0,
     levelsCompleted: 0,
@@ -15,85 +36,180 @@ const Dashboard = () => {
 
   const [testHistory, setTestHistory] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    // Load progress from localStorage
-    const storedProgress = JSON.parse(localStorage.getItem("studentProgress")) || {
-      exercisesCompleted: 0,
-      correctAnswers: 0,
-      totalQuestions: 0,
-      levelsCompleted: 0,
+    const fetchDashboardData = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        if (!token) {
+          setError("Please log in to view your dashboard");
+          setLoading(false);
+          return;
+        }
+
+        const response = await axios.get("http://localhost:3000/dashboard", {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        const data = response.data;
+        setProgress({
+          correctAnswers: data.correctAnswers || 0,
+          totalQuestions: data.totalQuestions || 0,
+          levelsCompleted: data.levelsCompleted || 0,
+        });
+
+        // Sort test history by date in descending order
+        const sortedHistory = [...(data.testHistory || [])].sort(
+          (a, b) => new Date(b.date) - new Date(a.date)
+        );
+        setTestHistory(sortedHistory);
+      } catch (err) {
+        setError("Failed to load dashboard data");
+        console.error("Dashboard fetch error:", err);
+      } finally {
+        setLoading(false);
+      }
     };
-    setProgress(storedProgress);
 
-    // Load test history from localStorage
-    const storedHistory = JSON.parse(localStorage.getItem("testHistory")) || [];
-    setTestHistory(storedHistory);
-
-    setLoading(false);
+    fetchDashboardData();
   }, []);
 
   const accuracy = progress.totalQuestions > 0 ? (progress.correctAnswers / progress.totalQuestions) * 100 : 0;
+  const wrongAnswers = progress.totalQuestions - progress.correctAnswers;
+
+  // Filter completed level tests
+  const completedLevelTests = testHistory
+    .filter(test => test.type === 'Level Test' && test.skillName.includes('Complete'))
+    .map(test => ({
+      ...test,
+      level: test.level || 0,
+      score: test.score || 0,
+      accuracy: test.accuracy || 0
+    }));
+
+  // Get practice exercise stats (Spelling and Math only)
+  const practiceStats = testHistory
+    .filter(test => test.type === 'Spelling' || test.type === 'Math')
+    .reduce((acc, test) => {
+      acc.totalQuestions += test.totalQuestions || 0;
+      acc.correctAnswers += test.correctAnswers || 0;
+      return acc;
+    }, { totalQuestions: 0, correctAnswers: 0 });
 
   // 📊 Pie Chart Data for Exercise Accuracy
   const pieData = {
-    labels: ["Correct Answers", "Incorrect Answers"],
+    labels: ["Correct Answers", "Wrong Answers"],
     datasets: [
       {
-        data: [progress.correctAnswers, progress.totalQuestions - progress.correctAnswers],
+        data: [progress.correctAnswers, wrongAnswers],
         backgroundColor: ["#4CAF50", "#FF5733"],
         hoverBackgroundColor: ["#45a049", "#ff453a"],
       },
     ],
   };
 
-  // 📊 Bar Chart Data for Level Progress
-  const barData = {
-    labels: ["Levels Completed"],
+  // Configure the bar chart data for level scores
+  const levelScoreData = {
+    labels: completedLevelTests.map(test => `Level ${test.level} (${test.level === 1 ? 'Easy' : test.level === 2 ? 'Medium' : 'Hard'})`),
     datasets: [
       {
-        label: "Levels Completed",
-        data: [progress.levelsCompleted],
-        backgroundColor: "#3498db",
-      },
-    ],
-  };
-
-  // 📊 Line Chart Data for Test History
-  const lineData = {
-    labels: testHistory.map((_, index) => `Test ${index + 1}`),
-    datasets: [
-      {
-        label: "Score",
-        data: testHistory.map(test => test.score),
-        borderColor: "#9b59b6",
-        backgroundColor: "rgba(155, 89, 182, 0.2)",
-        tension: 0.3,
-      },
-    ],
-  };
-
-  // Generate test history if empty
-  useEffect(() => {
-    if (testHistory.length === 0 && progress.exercisesCompleted > 0) {
-      // Generate some sample test history based on progress
-      const history = [];
-      for (let i = 0; i < Math.min(progress.exercisesCompleted, 10); i++) {
-        history.push({
-          date: new Date(Date.now() - i * 86400000).toISOString().split('T')[0],
-          type: ["Reading", "Spelling", "Math", "Level Test"][Math.floor(Math.random() * 4)],
-          score: Math.floor(Math.random() * 100),
-        });
+        label: 'Score',
+        data: completedLevelTests.map(test => test.score),
+        backgroundColor: '#4CAF50',
+        borderColor: '#45a049',
+        borderWidth: 1,
       }
-      setTestHistory(history);
-      localStorage.setItem("testHistory", JSON.stringify(history));
+    ]
+  };
+
+  // Configure the bar chart data for level accuracy
+  const levelAccuracyData = {
+    labels: completedLevelTests.map(test => `Level ${test.level} (${test.level === 1 ? 'Easy' : test.level === 2 ? 'Medium' : 'Hard'})`),
+    datasets: [
+      {
+        label: 'Accuracy',
+        data: completedLevelTests.map(test => test.accuracy),
+        backgroundColor: '#2196F3',
+        borderColor: '#1976D2',
+        borderWidth: 1,
+      }
+    ]
+  };
+
+  // Bar chart options for score
+  const scoreChartOptions = {
+    responsive: true,
+    scales: {
+      y: {
+        beginAtZero: true,
+        max: 5,
+        title: {
+          display: true,
+          text: 'Score (out of 5)'
+        }
+      },
+      x: {
+        ticks: {
+          maxRotation: 45,
+          minRotation: 45
+        }
+      }
+    },
+    plugins: {
+      legend: {
+        position: 'top',
+      },
+      title: {
+        display: true,
+        text: 'Level Scores'
+      }
     }
-  }, [progress.exercisesCompleted, testHistory.length]);
+  };
+
+  // Bar chart options for accuracy
+  const accuracyChartOptions = {
+    responsive: true,
+    scales: {
+      y: {
+        beginAtZero: true,
+        max: 100,
+        title: {
+          display: true,
+          text: 'Accuracy (%)'
+        }
+      },
+      x: {
+        ticks: {
+          maxRotation: 45,
+          minRotation: 45
+        }
+      }
+    },
+    plugins: {
+      legend: {
+        position: 'top',
+      },
+      title: {
+        display: true,
+        text: 'Level Accuracy'
+      }
+    }
+  };
 
   if (loading) {
     return (
       <div className="container">
         <h1>Loading Dashboard...</h1>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="container">
+        <h1>Error</h1>
+        <p>{error}</p>
       </div>
     );
   }
@@ -106,25 +222,71 @@ const Dashboard = () => {
         <div className="card">
           <h3>Overall Statistics</h3>
           <div className="stat-item">
-            <span className="stat-label">Exercises Completed:</span>
-            <span className="stat-value">{progress.exercisesCompleted}</span>
+            <span className="stat-label">Total Questions Attempted:</span>
+            <span className="stat-value">{progress.totalQuestions}</span>
           </div>
           <div className="stat-item">
             <span className="stat-label">Correct Answers:</span>
             <span className="stat-value">{progress.correctAnswers}</span>
           </div>
           <div className="stat-item">
-            <span className="stat-label">Total Questions:</span>
-            <span className="stat-value">{progress.totalQuestions}</span>
+            <span className="stat-label">Wrong Answers:</span>
+            <span className="stat-value">{wrongAnswers}</span>
+          </div>
+          <div className="stat-item">
+            <span className="stat-label">Overall Accuracy:</span>
+            <span className="stat-value">{accuracy.toFixed(1)}%</span>
           </div>
           <div className="stat-item">
             <span className="stat-label">Levels Completed:</span>
             <span className="stat-value">{progress.levelsCompleted}</span>
           </div>
-          <div className="stat-item">
-            <span className="stat-label">Accuracy:</span>
-            <span className="stat-value">{accuracy.toFixed(1)}%</span>
-          </div>
+        </div>
+
+        <div className="card">
+          <h3>Level Progress</h3>
+          {completedLevelTests.length > 0 ? (
+            <>
+              <div className="chart-container">
+                <Bar data={levelScoreData} options={scoreChartOptions} />
+              </div>
+              <div className="chart-container" style={{ marginTop: '20px' }}>
+                <Bar data={levelAccuracyData} options={accuracyChartOptions} />
+              </div>
+              <div className="level-progress">
+                {completedLevelTests.map((test, index) => (
+                  <div key={index} className="level-item">
+                    <h4>Level {test.level} ({test.level === 1 ? 'Easy' : test.level === 2 ? 'Medium' : 'Hard'})</h4>
+                    <div className="level-stats">
+                      <div className="stat-item">
+                        <span className="stat-label">Score:</span>
+                        <span className="stat-value">{test.score}/5</span>
+                      </div>
+                      <div className="stat-item">
+                        <span className="stat-label">Accuracy:</span>
+                        <span className="stat-value">{test.accuracy.toFixed(1)}%</span>
+                      </div>
+                      <div className="completion-date">
+                        Completed: {new Date(test.date).toLocaleDateString()}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p>No levels completed yet. Complete a level test to see your progress!</p>
+          )}
+        </div>
+      </div>
+
+      <div className="grid">
+        <div className="card">
+          <h3>✅ Practice Exercise Accuracy</h3>
+          <Pie data={pieData} />
+          <p className="chart-description">
+            Shows the ratio of correct vs wrong answers in spelling and math exercises
+          </p>
         </div>
 
         <div className="card">
@@ -133,58 +295,63 @@ const Dashboard = () => {
             <div className="activity-list">
               {testHistory.slice(0, 5).map((test, index) => (
                 <div key={index} className="activity-item">
-                  <div className="activity-date">{test.date}</div>
+                  <div className="activity-date">
+                    {new Date(test.date).toLocaleDateString()}
+                  </div>
                   <div className="activity-type">{test.type}</div>
-                  <div className="activity-score">{test.score}%</div>
+                  {test.type === 'Level Test' ? (
+                    <>
+                      <div className="activity-level">Level {test.level}</div>
+                      <div className="activity-score">
+                        Score: {test.score}/5
+                      </div>
+                      <div className="activity-accuracy">
+                        Accuracy: {test.accuracy.toFixed(1)}%
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="activity-score">
+                        Score: {test.score}/5
+                      </div>
+                      <div className="activity-accuracy">
+                        Accuracy: {test.accuracy.toFixed(1)}%
+                      </div>
+                    </>
+                  )}
+                  {test.skillName && (
+                    <div className="activity-skill">{test.skillName}</div>
+                  )}
                 </div>
               ))}
             </div>
           ) : (
-            <p>No recent activity. Complete some tests to see your progress!</p>
+            <p>No recent activity. Complete some exercises to see your progress!</p>
           )}
         </div>
-      </div>
-
-      <div className="grid">
-        <div className="card">
-          <h3>✅ Accuracy Chart</h3>
-          <Pie data={pieData} />
-        </div>
-
-        <div className="card">
-          <h3>📈 Levels Progress</h3>
-          <Bar data={barData} />
-        </div>
-      </div>
-
-      <div className="card">
-        <h3>📊 Test History</h3>
-        {testHistory.length > 0 ? (
-          <Line data={lineData} />
-        ) : (
-          <p>Complete some tests to see your progress over time!</p>
-        )}
       </div>
 
       <div className="card">
         <h3>🎯 Next Steps</h3>
         <div className="next-steps">
-          {progress.levelsCompleted < 3 ? (
-            <p>Continue practicing to complete all levels!</p>
-          ) : (
-            <p>Great job! You've completed all levels. Keep practicing to maintain your skills.</p>
-          )}
           <div className="recommendations">
-            <h4>Recommended Activities:</h4>
+            <h4>Level Test Progress:</h4>
             <ul>
-              {progress.exercisesCompleted < 10 && (
-                <li>Complete more exercises to improve your skills</li>
+              {completedLevelTests.length === 0 ? (
+                <li>Start with Level 1 test to establish your baseline</li>
+              ) : (
+                <>
+                  {progress.levelsCompleted < 3 && (
+                    <li>Continue to Level {progress.levelsCompleted + 1} test</li>
+                  )}
+                  {completedLevelTests[completedLevelTests.length - 1]?.score < 4 && (
+                    <li>Practice more to improve your current level score</li>
+                  )}
+                  {progress.levelsCompleted === 3 && (
+                    <li>Great job completing all levels! Keep practicing to maintain your skills</li>
+                  )}
+                </>
               )}
-              {progress.levelsCompleted < 3 && (
-                <li>Try the Level Test to challenge yourself</li>
-              )}
-              <li>Practice reading and spelling regularly</li>
-              <li>Work on math problems to strengthen your skills</li>
             </ul>
           </div>
         </div>

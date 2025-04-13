@@ -176,11 +176,27 @@ const SpellCheck = () => {
     setIsCorrect(isAnswerCorrect);
     setShowImage(true);
 
+    // Update dashboard with the result
+    const token = localStorage.getItem("token");
+    if (token) {
+      axios.post("http://localhost:3000/dashboard/update", {
+        exerciseType: "Spelling",
+        score: isAnswerCorrect ? 100 : 0,
+        skillName: `${currentWord.category} Spelling`,
+        correct: isAnswerCorrect ? 1 : 0,
+        total: 1,
+        isExerciseComplete: false  // Add this flag to indicate it's not a final update
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      }).catch(err => {
+        console.error("Failed to update dashboard:", err);
+      });
+    }
+
     if (isAnswerCorrect) {
       setScore(prev => prev + 1);
       setResult("✅ Correct! Well done!");
       playCorrectSound();
-      // Wait a bit longer before moving to next word
       setTimeout(() => {
         setShowImage(false);
         moveToNextWord();
@@ -188,7 +204,6 @@ const SpellCheck = () => {
     } else {
       setResult(`❌ Incorrect. The correct spelling is "${currentWord.correct}"`);
       playWrongSound();
-      // Show the error state briefly
       setTimeout(() => {
         setShowImage(false);
       }, 1500);
